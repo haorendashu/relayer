@@ -84,12 +84,12 @@ func (s *Server) doEvent(ctx context.Context, ws *WebSocket, request []json.RawM
 		// event deletion -- nip09
 		for _, tag := range evt.Tags {
 			if len(tag) >= 2 && tag[0] == "e" {
-				ctx, cancel := context.WithTimeout(ctx, time.Millisecond*200)
-				defer cancel()
+				tagCtx, cancel := context.WithTimeout(ctx, time.Millisecond*200)
 
 				// fetch event to be deleted
-				res, err := s.relay.Storage(ctx).QueryEvents(ctx, nostr.Filter{IDs: []string{tag[1]}})
+				res, err := s.relay.Storage(tagCtx).QueryEvents(tagCtx, nostr.Filter{IDs: []string{tag[1]}})
 				if err != nil {
+					cancel()
 					ws.WriteJSON(nostr.OKEnvelope{EventID: evt.ID, OK: false, Reason: "failed to query for target event"})
 					return ""
 				}
@@ -98,8 +98,9 @@ func (s *Server) doEvent(ctx context.Context, ws *WebSocket, request []json.RawM
 				exists := false
 				select {
 				case target, exists = <-res:
-				case <-ctx.Done():
+				case <-tagCtx.Done():
 				}
+				cancel()
 				if !exists {
 					// this will happen if event is not in the database
 					// or when when the query is taking too long, so we just give up
@@ -381,8 +382,8 @@ func (s *Server) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()
 	s.clients[conn] = struct{}{}
+	s.clientsMu.Unlock()
 	ticker := time.NewTicker(pingPeriod)
 
 	ip := conn.RemoteAddr().String()
